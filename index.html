@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RD Motors — Stock Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 2rem 1.5rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    header h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    header p {
+      margin-top: 0.4rem;
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem;
+      max-width: 860px;
+      margin: 0 auto 3rem;
+    }
+
+    .stat-card {
+      background: #1e2230;
+      border: 1px solid #2d3348;
+      border-radius: 12px;
+      padding: 1.5rem 1.75rem;
+    }
+    .stat-card .label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin-bottom: 0.5rem;
+    }
+    .stat-card .value {
+      font-size: 2.4rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .stat-card .sub {
+      margin-top: 0.4rem;
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+    .value.green { color: #34d399; }
+    .value.blue  { color: #60a5fa; }
+
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 1.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .chart-card {
+      background: #1e2230;
+      border: 1px solid #2d3348;
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+    .chart-card h2 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-bottom: 1rem;
+    }
+    .chart-card canvas {
+      width: 100% !important;
+    }
+
+    #updated {
+      text-align: center;
+      margin-top: 2.5rem;
+      font-size: 0.78rem;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>RD Motors — Vehicle Stock Dashboard</h1>
+  <p>Live tracking of <a href="https://rdmotors.co.nz/our-vehicles/" target="_blank" style="color:#60a5fa;text-decoration:none">rdmotors.co.nz/our-vehicles</a> · updated daily</p>
+</header>
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="label">Total Stock Value</div>
+    <div class="value green" id="stat-value">—</div>
+    <div class="sub" id="stat-value-change"></div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Vehicles in Stock</div>
+    <div class="value blue" id="stat-count">—</div>
+    <div class="sub" id="stat-count-change"></div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-card">
+    <h2>Total Stock Value Over Time</h2>
+    <canvas id="chart-value"></canvas>
+  </div>
+  <div class="chart-card">
+    <h2>Vehicle Count Over Time</h2>
+    <canvas id="chart-count"></canvas>
+  </div>
+</div>
+
+<p id="updated"></p>
+
+<script>
+  const DATA_URL = "data/history.json";
+
+  function fmtMoney(v) {
+    return "$" + v.toLocaleString("en-NZ");
+  }
+
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  function delta(current, previous, formatter) {
+    if (previous === undefined) return "";
+    const diff = current - previous;
+    if (diff === 0) return "No change from yesterday";
+    const sign = diff > 0 ? "▲ +" : "▼ ";
+    return sign + formatter(Math.abs(diff)) + " from previous";
+  }
+
+  function makeChart(id, labels, data, color, yFormatter) {
+    const ctx = document.getElementById(id).getContext("2d");
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          data,
+          borderColor: color,
+          backgroundColor: color + "22",
+          borderWidth: 2,
+          pointRadius: data.length < 30 ? 4 : 2,
+          pointHoverRadius: 6,
+          fill: true,
+          tension: 0.3,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => yFormatter(ctx.parsed.y)
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: "#64748b", maxTicksLimit: 8 },
+            grid: { color: "#2d3348" }
+          },
+          y: {
+            ticks: {
+              color: "#64748b",
+              callback: v => yFormatter(v)
+            },
+            grid: { color: "#2d3348" }
+          }
+        }
+      }
+    });
+  }
+
+  async function init() {
+    const res = await fetch(DATA_URL + "?t=" + Date.now());
+    const history = await res.json();
+
+    if (!history.length) return;
+
+    const latest = history[history.length - 1];
+    const prev   = history.length > 1 ? history[history.length - 2] : undefined;
+
+    document.getElementById("stat-value").textContent = fmtMoney(latest.total_value);
+    document.getElementById("stat-count").textContent = latest.count;
+    document.getElementById("stat-value-change").textContent = delta(latest.total_value, prev?.total_value, fmtMoney);
+    document.getElementById("stat-count-change").textContent = delta(latest.count, prev?.count, v => v + " vehicles");
+
+    const labels = history.map(h => fmtDate(h.timestamp));
+    const values = history.map(h => h.total_value);
+    const counts = history.map(h => h.count);
+
+    makeChart("chart-value", labels, values, "#34d399", fmtMoney);
+    makeChart("chart-count", labels, counts, "#60a5fa", v => v + " vehicles");
+
+    document.getElementById("updated").textContent =
+      "Last snapshot: " + fmtDate(latest.timestamp);
+  }
+
+  init();
+</script>
+</body>
+</html>
