@@ -26,13 +26,6 @@ def fetch_vehicles():
             if 1_000 <= value <= 500_000:
                 prices.append(value)
 
-    # Deduplicate while preserving order (some prices appear in og:title etc.)
-    seen = []
-    for p in prices:
-        if p not in seen:
-            seen.append(p)
-    prices = seen
-
     return prices
 
 
