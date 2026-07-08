@@ -20,16 +20,8 @@
       text-align: center;
       margin-bottom: 2.5rem;
     }
-    header h1 {
-      font-size: 1.8rem;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-    }
-    header p {
-      margin-top: 0.4rem;
-      color: #94a3b8;
-      font-size: 0.9rem;
-    }
+    header h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.5px; }
+    header p  { margin-top: 0.4rem; color: #94a3b8; font-size: 0.9rem; }
 
     .stats {
       display: grid;
@@ -52,23 +44,21 @@
       color: #64748b;
       margin-bottom: 0.5rem;
     }
-    .stat-card .value {
-      font-size: 2.4rem;
-      font-weight: 700;
-      line-height: 1;
-    }
-    .stat-card .sub {
-      margin-top: 0.4rem;
-      font-size: 0.8rem;
-      color: #64748b;
-    }
+    .stat-card .value { font-size: 2.4rem; font-weight: 700; line-height: 1; }
+    .stat-card .sub   { margin-top: 0.4rem; font-size: 0.8rem; color: #64748b; }
     .value.green { color: #34d399; }
     .value.blue  { color: #60a5fa; }
+    .value.amber { color: #fbbf24; }
 
-    .charts {
+    /* Top two charts side-by-side, sales chart full width below */
+    .charts-top {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
       gap: 1.5rem;
+      max-width: 1100px;
+      margin: 0 auto 1.5rem;
+    }
+    .charts-bottom {
       max-width: 1100px;
       margin: 0 auto;
     }
@@ -79,14 +69,41 @@
       border-radius: 12px;
       padding: 1.5rem;
     }
+    .chart-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
     .chart-card h2 {
       font-size: 0.9rem;
       font-weight: 600;
       color: #94a3b8;
-      margin-bottom: 1rem;
     }
-    .chart-card canvas {
-      width: 100% !important;
+    .chart-card canvas { width: 100% !important; }
+
+    /* Period toggle buttons */
+    .period-toggle {
+      display: flex;
+      gap: 0.25rem;
+    }
+    .period-toggle button {
+      background: #2d3348;
+      border: 1px solid #3d4560;
+      color: #94a3b8;
+      border-radius: 6px;
+      padding: 0.25rem 0.65rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .period-toggle button:hover { background: #3d4560; }
+    .period-toggle button.active {
+      background: #fbbf2422;
+      border-color: #fbbf24;
+      color: #fbbf24;
     }
 
     #updated {
@@ -115,16 +132,36 @@
     <div class="value blue" id="stat-count">—</div>
     <div class="sub" id="stat-count-change"></div>
   </div>
+  <div class="stat-card">
+    <div class="label">Est. Sales (all time)</div>
+    <div class="value amber" id="stat-sales">—</div>
+    <div class="sub" id="stat-sales-sub"></div>
+  </div>
 </div>
 
-<div class="charts">
+<div class="charts-top">
   <div class="chart-card">
-    <h2>Total Stock Value Over Time</h2>
+    <div class="chart-card-header"><h2>Total Stock Value Over Time</h2></div>
     <canvas id="chart-value"></canvas>
   </div>
   <div class="chart-card">
-    <h2>Vehicle Count Over Time</h2>
+    <div class="chart-card-header"><h2>Vehicle Count Over Time</h2></div>
     <canvas id="chart-count"></canvas>
+  </div>
+</div>
+
+<div class="charts-bottom">
+  <div class="chart-card">
+    <div class="chart-card-header">
+      <h2>Estimated Sales Value</h2>
+      <div class="period-toggle" id="period-toggle">
+        <button data-period="day"   class="active">Day</button>
+        <button data-period="week"  >Week</button>
+        <button data-period="month" >Month</button>
+        <button data-period="year"  >Year</button>
+      </div>
+    </div>
+    <canvas id="chart-sales"></canvas>
   </div>
 </div>
 
@@ -134,7 +171,7 @@
   const DATA_URL = "data/history.json";
 
   function fmtMoney(v) {
-    return "$" + v.toLocaleString("en-NZ");
+    return "$" + Math.round(v).toLocaleString("en-NZ");
   }
 
   function fmtDate(iso) {
@@ -149,9 +186,49 @@
     return sign + formatter(Math.abs(diff)) + " from previous";
   }
 
-  function makeChart(id, labels, data, color, yFormatter) {
+  // Returns ISO week string "YYYY-Www"
+  function isoWeek(date) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+    const week1 = new Date(d.getFullYear(), 0, 4);
+    const wn = 1 + Math.round(((d - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+    return `${d.getFullYear()}-W${String(wn).padStart(2, "0")}`;
+  }
+
+  function periodKey(iso, period) {
+    const d = new Date(iso);
+    if (period === "day")   return fmtDate(iso);
+    if (period === "week")  return isoWeek(d);
+    if (period === "month") return d.toLocaleDateString("en-NZ", { month: "short", year: "numeric" });
+    if (period === "year")  return String(d.getFullYear());
+  }
+
+  // Derive per-snapshot sales: positive drop in total_value between consecutive points
+  function calcSalesPoints(history) {
+    const points = [];
+    for (let i = 1; i < history.length; i++) {
+      const drop = history[i - 1].total_value - history[i].total_value;
+      points.push({
+        timestamp: history[i].timestamp,
+        sales: drop > 0 ? drop : 0,
+      });
+    }
+    return points;
+  }
+
+  function aggregateSales(salesPoints, period) {
+    const buckets = new Map();
+    for (const p of salesPoints) {
+      const key = periodKey(p.timestamp, period);
+      buckets.set(key, (buckets.get(key) ?? 0) + p.sales);
+    }
+    return { labels: [...buckets.keys()], data: [...buckets.values()] };
+  }
+
+  function makeLineChart(id, labels, data, color, yFormatter) {
     const ctx = document.getElementById(id).getContext("2d");
-    new Chart(ctx, {
+    return new Chart(ctx, {
       type: "line",
       data: {
         labels,
@@ -170,22 +247,41 @@
         responsive: true,
         plugins: {
           legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: ctx => yFormatter(ctx.parsed.y)
-            }
-          }
+          tooltip: { callbacks: { label: ctx => yFormatter(ctx.parsed.y) } }
         },
         scales: {
-          x: {
-            ticks: { color: "#64748b", maxTicksLimit: 8 },
-            grid: { color: "#2d3348" }
-          },
+          x: { ticks: { color: "#64748b", maxTicksLimit: 8 }, grid: { color: "#2d3348" } },
+          y: { ticks: { color: "#64748b", callback: v => yFormatter(v) }, grid: { color: "#2d3348" } }
+        }
+      }
+    });
+  }
+
+  function makeBarChart(id, labels, data, color, yFormatter) {
+    const ctx = document.getElementById(id).getContext("2d");
+    return new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [{
+          data,
+          backgroundColor: color + "99",
+          borderColor: color,
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => yFormatter(ctx.parsed.y) } }
+        },
+        scales: {
+          x: { ticks: { color: "#64748b", maxTicksLimit: 12 }, grid: { color: "#2d3348" } },
           y: {
-            ticks: {
-              color: "#64748b",
-              callback: v => yFormatter(v)
-            },
+            beginAtZero: true,
+            ticks: { color: "#64748b", callback: v => yFormatter(v) },
             grid: { color: "#2d3348" }
           }
         }
@@ -196,26 +292,47 @@
   async function init() {
     const res = await fetch(DATA_URL + "?t=" + Date.now());
     const history = await res.json();
-
     if (!history.length) return;
 
-    const latest = history[history.length - 1];
-    const prev   = history.length > 1 ? history[history.length - 2] : undefined;
+    const latest  = history[history.length - 1];
+    const prev    = history.length > 1 ? history[history.length - 2] : undefined;
+    const salesPts = calcSalesPoints(history);
+    const totalSales = salesPts.reduce((s, p) => s + p.sales, 0);
 
+    // Stat cards
     document.getElementById("stat-value").textContent = fmtMoney(latest.total_value);
     document.getElementById("stat-count").textContent = latest.count;
     document.getElementById("stat-value-change").textContent = delta(latest.total_value, prev?.total_value, fmtMoney);
     document.getElementById("stat-count-change").textContent = delta(latest.count, prev?.count, v => v + " vehicles");
+    document.getElementById("stat-sales").textContent = fmtMoney(totalSales);
+    document.getElementById("stat-sales-sub").textContent =
+      salesPts.length ? `across ${salesPts.filter(p => p.sales > 0).length} days with activity` : "Not enough data yet";
 
-    const labels = history.map(h => fmtDate(h.timestamp));
-    const values = history.map(h => h.total_value);
-    const counts = history.map(h => h.count);
+    // Stock charts
+    makeLineChart("chart-value", history.map(h => fmtDate(h.timestamp)), history.map(h => h.total_value), "#34d399", fmtMoney);
+    makeLineChart("chart-count", history.map(h => fmtDate(h.timestamp)), history.map(h => h.count), "#60a5fa", v => v + " vehicles");
 
-    makeChart("chart-value", labels, values, "#34d399", fmtMoney);
-    makeChart("chart-count", labels, counts, "#60a5fa", v => v + " vehicles");
+    // Sales chart with period toggle
+    let salesChart = null;
+    let activePeriod = "day";
 
-    document.getElementById("updated").textContent =
-      "Last snapshot: " + fmtDate(latest.timestamp);
+    function renderSales(period) {
+      const { labels, data } = aggregateSales(salesPts, period);
+      if (salesChart) salesChart.destroy();
+      salesChart = makeBarChart("chart-sales", labels, data, "#fbbf24", fmtMoney);
+    }
+
+    document.getElementById("period-toggle").addEventListener("click", e => {
+      const btn = e.target.closest("button[data-period]");
+      if (!btn) return;
+      activePeriod = btn.dataset.period;
+      document.querySelectorAll("#period-toggle button").forEach(b => b.classList.toggle("active", b === btn));
+      renderSales(activePeriod);
+    });
+
+    renderSales(activePeriod);
+
+    document.getElementById("updated").textContent = "Last snapshot: " + fmtDate(latest.timestamp);
   }
 
   init();
