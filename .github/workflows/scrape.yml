@@ -15,17 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install dependencies
-        run: pip install -r scraper/requirements.txt
+        run: pip3 install -r scraper/requirements.txt
 
       - name: Run scraper
         env:
           SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
-        run: python scraper/scrape.py
+        run: python3 scraper/scrape.py
 
       - name: Commit updated data
         run: |
