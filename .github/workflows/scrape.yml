@@ -23,6 +23,8 @@ jobs:
         run: pip install -r scraper/requirements.txt
 
       - name: Run scraper
+        env:
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
         run: python scraper/scrape.py
 
       - name: Commit updated data

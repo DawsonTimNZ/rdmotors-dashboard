@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -7,12 +8,21 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-URL = "https://rdmotors.co.nz/our-vehicles/"
+TARGET_URL = "https://rdmotors.co.nz/our-vehicles/"
 DATA_FILE = Path(__file__).parent.parent / "data" / "history.json"
+
+SCRAPER_API_KEY = os.environ.get("SCRAPER_API_KEY", "")
+
+
+def build_url():
+    if SCRAPER_API_KEY:
+        return f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={TARGET_URL}"
+    return TARGET_URL
 
 
 def fetch_vehicles():
-    response = requests.get(URL, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    url = build_url()
+    response = requests.get(url, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
 
