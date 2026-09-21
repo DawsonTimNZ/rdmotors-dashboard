@@ -40,9 +40,26 @@ def save_history(history):
 
 
 def main():
-    prices = fetch_vehicles()
+    try:
+        prices = fetch_vehicles()
+    except requests.exceptions.ConnectionError as e:
+        print(f"WARNING: Could not reach {URL} — skipping this run.")
+        print(f"  Detail: {e}")
+        sys.exit(0)
+    except requests.exceptions.HTTPError as e:
+        print(f"WARNING: HTTP error fetching {URL} — skipping this run.")
+        print(f"  Detail: {e}")
+        sys.exit(0)
+    except requests.exceptions.Timeout:
+        print(f"WARNING: Request to {URL} timed out — skipping this run.")
+        sys.exit(0)
+
     count = len(prices)
     total = sum(prices)
+
+    if count == 0:
+        print("WARNING: No vehicle prices found — page structure may have changed. Skipping.")
+        sys.exit(0)
 
     print(f"Vehicles found: {count}")
     print(f"Total value:    ${total:,}")
